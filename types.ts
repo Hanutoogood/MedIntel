@@ -8,6 +8,8 @@ export enum RecordType {
   VITAL_LOG = 'Vital Log'
 }
 
+export type UserRole = 'admin' | 'patient';
+
 export interface MedicalRecord {
   id: string;
   date: string;
@@ -17,6 +19,7 @@ export interface MedicalRecord {
   summary?: string;
   rawContent: string;
   status: 'synced' | 'pending' | 'error';
+  bmi?: number;
 }
 
 export interface Medication {
