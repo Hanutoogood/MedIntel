@@ -1,5 +1,5 @@
 {
-  "name": "Copy of MedIntel - AI Medical Record Platform",
+  "name": "MedIntel - AI Medical Record Platform",
   "description": "A comprehensive AI-powered platform for consolidating, interpreting, and managing fragmented medical records into a unified, patient-centric intelligence hub.",
   "requestFramePermissions": [
     "camera"

@@ -1,13 +1,13 @@
 
 import { GoogleGenAI, GenerateContentResponse, Chat, Type } from "@google/genai";
 
-const MODEL_NAME = 'gemini-3-pro-preview';
+const MODEL_NAME = 'gemini-3.1-pro-preview';
 
 export class GeminiService {
   private ai: GoogleGenAI;
 
   constructor() {
-    this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+    this.ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
   }
 
   async analyzeDocument(content: string, useThinking: boolean = false): Promise<string> {
@@ -85,6 +85,79 @@ export class GeminiService {
     } catch (error) {
       console.error("Gemini Extraction Error:", error);
       return [];
+    }
+  }
+
+  async suggestMedicalCodes(content: string): Promise<{ codes: any[], ambiguities: string[] }> {
+    const prompt = `
+      You are an expert medical coder. Analyze the following clinical notes/patient records and suggest appropriate medical codes (ICD-10 for diagnoses and CPT for procedures).
+      Also, identify any ambiguities or missing information that would be required for more accurate coding.
+      
+      Clinical Notes:
+      ${content}
+    `;
+
+    try {
+      const response: GenerateContentResponse = await this.ai.models.generateContent({
+        model: MODEL_NAME,
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              codes: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    code: { type: Type.STRING },
+                    description: { type: Type.STRING },
+                    type: { type: Type.STRING, enum: ["ICD-10", "CPT"] }
+                  },
+                  required: ["code", "description", "type"]
+                }
+              },
+              ambiguities: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+              }
+            },
+            required: ["codes", "ambiguities"]
+          }
+        }
+      });
+
+      return JSON.parse(response.text || '{"codes": [], "ambiguities": []}');
+    } catch (error) {
+      console.error("Gemini Coding Suggestion Error:", error);
+      return { codes: [], ambiguities: ["Failed to generate coding suggestions due to an error."] };
+    }
+  }
+
+  async extractTextFromImage(base64Image: string, mimeType: string): Promise<string> {
+    const prompt = "Extract all text from this medical document image. Maintain the structure as much as possible. If it's a prescription, list the medicines, dosages, and instructions clearly.";
+    
+    try {
+      const response: GenerateContentResponse = await this.ai.models.generateContent({
+        model: 'gemini-3-flash-preview', 
+        contents: {
+          parts: [
+            { text: prompt },
+            {
+              inlineData: {
+                data: base64Image.split(',')[1] || base64Image,
+                mimeType: mimeType
+              }
+            }
+          ]
+        }
+      });
+      
+      return response.text || "Could not extract text from image.";
+    } catch (error) {
+      console.error("Gemini Image Extraction Error:", error);
+      return "Error extracting text from image.";
     }
   }
 

@@ -1,10 +1,11 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
 import RecordCard from './components/RecordCard';
 import ChatInterface from './components/ChatInterface';
 import AdminDashboard from './components/AdminDashboard';
+import InteractiveCreature from './components/InteractiveCreature';
 import { BloodPressureLog, MedicalRecord, HealthMetric, RecordType, Medication, UserRole } from './types';
 import { geminiService } from './services/geminiService';
 
@@ -26,6 +27,8 @@ const App: React.FC = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
+  const [mobileNumber, setMobileNumber] = useState('');
+  const [isEyesClosed, setIsEyesClosed] = useState(false);
   const [authError, setAuthError] = useState('');
   const [notifications, setNotifications] = useState<{id: string, message: string}[]>([]);
   const [theme, setTheme] = useState<'light' | 'dark'>(localStorage.getItem('medintel_theme') as 'light' | 'dark' || 'light');
@@ -44,6 +47,8 @@ const App: React.FC = () => {
     bmi: ''
   });
   const [isSavingRecord, setIsSavingRecord] = useState(false);
+  const [isExtractingText, setIsExtractingText] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load User Data when currentUser changes
   useEffect(() => {
@@ -149,8 +154,8 @@ const App: React.FC = () => {
     const admins = JSON.parse(localStorage.getItem('medintel_admins') || '{}');
 
     if (loginMode === 'register') {
-      if (selectedRole === 'patient' && !email) {
-        setAuthError('Email address is required for notifications.');
+      if (selectedRole === 'patient' && (!email || !mobileNumber)) {
+        setAuthError('Email and Mobile Number are required for notifications.');
         return;
       }
 
@@ -165,7 +170,7 @@ const App: React.FC = () => {
       if (users[username]) {
         // If it was pre-registered by admin, we allow "completing" the registration
         if (users[username].isPreRegistered) {
-          users[username] = { ...users[username], email, isPreRegistered: false };
+          users[username] = { ...users[username], email, mobileNumber, isPreRegistered: false };
         } else {
           setAuthError('Username already taken.');
           return;
@@ -197,7 +202,7 @@ const App: React.FC = () => {
       // Additional check for patients: their password must be a valid admin username
       if (selectedRole === 'patient') {
         if (users[username].isPreRegistered) {
-          setAuthError('Please Sign Up first to complete your profile and provide an email address.');
+          setAuthError('Please Sign Up first to complete your profile and provide your contact details.');
           return;
         }
         if (!admins[password]) {
@@ -218,6 +223,7 @@ const App: React.FC = () => {
     setUsername('');
     setPassword('');
     setEmail('');
+    setMobileNumber('');
   };
 
   const logout = () => {
@@ -230,6 +236,7 @@ const App: React.FC = () => {
     setUsername('');
     setPassword('');
     setEmail('');
+    setMobileNumber('');
     setLoginMode('login');
   };
 
@@ -323,6 +330,27 @@ const App: React.FC = () => {
     }
   };
 
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsExtractingText(true);
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64 = reader.result as string;
+      try {
+        const extractedText = await geminiService.extractTextFromImage(base64, file.type);
+        setNewRecord(prev => ({ ...prev, content: extractedText }));
+      } catch (error) {
+        console.error("Error extracting text:", error);
+        alert("Failed to extract text from image.");
+      } finally {
+        setIsExtractingText(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const navigateToAssistant = (prompt: string) => {
     let context = `Health Context for ${currentUser}:\n`;
     records.forEach(r => context += `- ${r.date}: ${r.type} from ${r.facility}\n`);
@@ -372,17 +400,20 @@ const App: React.FC = () => {
     return (
       <div className="min-h-screen bg-slate-900 dark:bg-black flex items-center justify-center p-4">
         <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 border border-white/10">
-          <div className="bg-blue-600 p-10 text-center relative">
-            <button 
-              onClick={() => setSelectedRole(null)}
-              className="absolute top-6 left-6 text-blue-200 hover:text-white transition-colors"
-            >
-              ← Back
-            </button>
-            <div className="bg-white w-16 h-16 rounded-2xl flex items-center justify-center text-blue-600 font-black text-3xl mx-auto mb-4 shadow-lg">M</div>
-            <h1 className="text-white text-3xl font-bold tracking-tight">MedIntel</h1>
-            <p className="text-blue-100 text-sm mt-2">{selectedRole === 'admin' ? 'Hospital Administration' : 'Patient Intelligence Hub'}</p>
-          </div>
+            <div className="bg-blue-600 p-10 text-center relative">
+              <button 
+                onClick={() => setSelectedRole(null)}
+                className="absolute top-6 left-6 text-blue-200 hover:text-white transition-colors"
+              >
+                ← Back
+              </button>
+              <div className="bg-white w-16 h-16 rounded-2xl flex items-center justify-center text-blue-600 font-black text-3xl mx-auto mb-4 shadow-lg">M</div>
+              <h1 className="text-white text-3xl font-bold tracking-tight">MedIntel</h1>
+              <p className="text-blue-100 text-sm mt-2">{selectedRole === 'admin' ? 'Hospital Administration' : 'Patient Intelligence Hub'}</p>
+              <div className="mt-6">
+                <InteractiveCreature isEyesClosed={isEyesClosed} />
+              </div>
+            </div>
           <div className="p-10">
             <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl mb-8">
               <button 
@@ -406,6 +437,8 @@ const App: React.FC = () => {
                   type="text" 
                   value={username} 
                   onChange={e => setUsername(e.target.value)}
+                  onFocus={() => setIsEyesClosed(true)}
+                  onBlur={() => setIsEyesClosed(false)}
                   className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-5 py-4 outline-none focus:ring-2 focus:ring-blue-500 transition-all text-slate-900 dark:text-slate-100"
                   placeholder="Enter username"
                   autoComplete="username"
@@ -417,6 +450,8 @@ const App: React.FC = () => {
                   type="password" 
                   value={password} 
                   onChange={e => setPassword(e.target.value)}
+                  onFocus={() => setIsEyesClosed(true)}
+                  onBlur={() => setIsEyesClosed(false)}
                   className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-5 py-4 outline-none focus:ring-2 focus:ring-blue-500 transition-all text-slate-900 dark:text-slate-100"
                   placeholder={selectedRole === 'admin' ? '••••••••' : 'Enter Hospital Code'}
                   autoComplete="current-password"
@@ -424,15 +459,31 @@ const App: React.FC = () => {
               </div>
 
               {loginMode === 'register' && selectedRole === 'patient' && (
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 dark:text-slate-500 uppercase mb-2 tracking-wider">Email Address</label>
-                  <input 
-                    type="email" 
-                    value={email} 
-                    onChange={e => setEmail(e.target.value)}
-                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-5 py-4 outline-none focus:ring-2 focus:ring-blue-500 transition-all text-slate-900 dark:text-slate-100"
-                    placeholder="john@example.com"
-                  />
+                <div className="space-y-5">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 dark:text-slate-500 uppercase mb-2 tracking-wider">Email Address</label>
+                    <input 
+                      type="email" 
+                      value={email} 
+                      onChange={e => setEmail(e.target.value)}
+                      onFocus={() => setIsEyesClosed(true)}
+                      onBlur={() => setIsEyesClosed(false)}
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-5 py-4 outline-none focus:ring-2 focus:ring-blue-500 transition-all text-slate-900 dark:text-slate-100"
+                      placeholder="john@example.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 dark:text-slate-500 uppercase mb-2 tracking-wider">Mobile Number</label>
+                    <input 
+                      type="tel" 
+                      value={mobileNumber} 
+                      onChange={e => setMobileNumber(e.target.value)}
+                      onFocus={() => setIsEyesClosed(true)}
+                      onBlur={() => setIsEyesClosed(false)}
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-5 py-4 outline-none focus:ring-2 focus:ring-blue-500 transition-all text-slate-900 dark:text-slate-100"
+                      placeholder="+1 (555) 000-0000"
+                    />
+                  </div>
                   <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-2 font-medium">Used for medication adherence notifications.</p>
                 </div>
               )}
@@ -707,13 +758,32 @@ const App: React.FC = () => {
                     </div>
                   </div>
                   <div className="md:col-span-2">
-                    <label className="block text-xs font-black text-slate-400 dark:text-slate-500 uppercase mb-3 tracking-widest">Clinical Notes or Text</label>
+                    <div className="flex justify-between items-center mb-3">
+                      <label className="block text-xs font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Clinical Notes or Text</label>
+                      <div className="flex space-x-2">
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          className="hidden" 
+                          ref={fileInputRef}
+                          onChange={handleImageUpload}
+                        />
+                        <button 
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={isExtractingText}
+                          className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${isExtractingText ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/30'}`}
+                        >
+                          <span>{isExtractingText ? '⌛ Extracting...' : '📷 Scan Document'}</span>
+                        </button>
+                      </div>
+                    </div>
                     <textarea 
                       value={newRecord.content} 
                       onChange={e => setNewRecord({...newRecord, content: e.target.value})} 
                       rows={4}
                       className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-6 py-5 outline-none focus:ring-2 focus:ring-blue-500 resize-none font-medium text-slate-700 dark:text-slate-300"
-                      placeholder="Paste prescriptions, lab findings, or visit summaries here..."
+                      placeholder="Paste prescriptions, lab findings, or visit summaries here, or scan a document above..."
                     />
                     <p className="mt-3 text-[10px] font-bold text-blue-500 dark:text-blue-400 uppercase tracking-widest flex items-center">
                       <span className="w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></span>

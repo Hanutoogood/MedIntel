@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
-import { MedicalRecord, Medication } from '../types';
+import { MedicalRecord, Medication, MedicalCode } from '../types';
+import { geminiService } from '../services/geminiService';
 
 interface AdminDashboardProps {
   onLogout: () => void;
@@ -16,6 +17,7 @@ interface PatientData {
   adherence: Record<string, boolean>;
   bpLogs: any[];
   email: string;
+  mobileNumber: string;
 }
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminUsername, theme, toggleTheme }) => {
@@ -26,6 +28,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminUsername
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [patientToDelete, setPatientToDelete] = useState<string | null>(null);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+  const [analyzingRecordId, setAnalyzingRecordId] = useState<string | null>(null);
 
   const patients = useMemo(() => {
     const users = JSON.parse(localStorage.getItem('medintel_users') || '{}');
@@ -39,6 +42,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminUsername
       const medications = JSON.parse(localStorage.getItem(`medintel_${username}_meds`) || '[]');
       const bpLogs = JSON.parse(localStorage.getItem(`medintel_${username}_bp`) || '[]');
       const email = users[username].email || 'Not provided';
+      const mobileNumber = users[username].mobileNumber || 'Not provided';
       
       const today = new Date().toISOString().split('T')[0];
       const adherence = JSON.parse(localStorage.getItem(`medintel_${username}_adherence_${today}`) || '{}');
@@ -49,7 +53,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminUsername
         medications,
         adherence,
         bpLogs,
-        email
+        email,
+        mobileNumber
       });
     });
 
@@ -133,6 +138,32 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminUsername
     onLogout();
   };
 
+  const handleSuggestCodes = async (patientUsername: string, recordId: string, content: string) => {
+    setAnalyzingRecordId(recordId);
+    try {
+      const result = await geminiService.suggestMedicalCodes(content);
+      
+      // Update local storage for this patient's records
+      const storageKey = `medintel_${patientUsername}_records`;
+      const savedRecords: MedicalRecord[] = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      
+      const updatedRecords = savedRecords.map(r => {
+        if (r.id === recordId) {
+          return { ...r, suggestedCodes: result.codes, ambiguities: result.ambiguities };
+        }
+        return r;
+      });
+      
+      localStorage.setItem(storageKey, JSON.stringify(updatedRecords));
+      setRefreshTrigger(prev => prev + 1);
+    } catch (error) {
+      console.error("Error suggesting codes:", error);
+      alert("Failed to suggest medical codes.");
+    } finally {
+      setAnalyzingRecordId(null);
+    }
+  };
+
   const filteredPatients = patients.filter(p => 
     p.username.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -141,7 +172,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminUsername
 
   const exportToCSV = () => {
     let csvContent = "data:text/csv;charset=utf-8,";
-    csvContent += "Patient,Record Date,Type,Facility,BMI,Medications,Adherence (Today),Email\n";
+    csvContent += "Patient,Record Date,Type,Facility,BMI,Medications,Adherence (Today),Email,Mobile\n";
 
     patients.forEach(p => {
       const meds = p.medications.map(m => m.name).join('; ');
@@ -152,10 +183,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminUsername
       
       if (p.records.length > 0) {
         p.records.forEach(r => {
-          csvContent += `${p.username},${r.date},${r.type},${r.facility},${r.bmi || ''},"${meds}","${adherenceStr}","${p.email}"\n`;
+          csvContent += `${p.username},${r.date},${r.type},${r.facility},${r.bmi || ''},"${meds}","${adherenceStr}","${p.email}","${p.mobileNumber}"\n`;
         });
       } else {
-        csvContent += `${p.username},N/A,N/A,N/A,N/A,"${meds}","${adherenceStr}","${p.email}"\n`;
+        csvContent += `${p.username},N/A,N/A,N/A,N/A,"${meds}","${adherenceStr}","${p.email}","${p.mobileNumber}"\n`;
       }
     });
 
@@ -276,7 +307,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminUsername
                 </div>
               </header>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                 <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
                   <p className="text-xs font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2">Medication Adherence</p>
                   <div className="flex items-center space-x-3">
@@ -292,7 +323,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminUsername
                 </div>
                 <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
                   <p className="text-xs font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2">Email Address</p>
-                  <div className="text-lg font-bold text-slate-800 dark:text-slate-200 truncate" title={activePatient.email}>{activePatient.email}</div>
+                  <div className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate" title={activePatient.email}>{activePatient.email}</div>
+                </div>
+                <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                  <p className="text-xs font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2">Mobile Number</p>
+                  <div className="text-sm font-bold text-slate-800 dark:text-slate-200">{activePatient.mobileNumber}</div>
                 </div>
               </div>
 
@@ -300,16 +335,66 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout, adminUsername
                 <h3 className="text-xl font-bold text-slate-800 dark:text-slate-200">Clinical Records</h3>
                 <div className="grid grid-cols-1 gap-4">
                   {activePatient.records.map(r => (
-                    <div key={r.id} className="bg-white border border-slate-200 rounded-2xl p-6 flex justify-between items-center">
-                      <div>
-                        <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded uppercase tracking-wider">{r.type}</span>
-                        <h4 className="font-bold text-slate-800 mt-2">{r.facility}</h4>
-                        <p className="text-xs text-slate-500">{r.date} • {r.provider}</p>
+                    <div key={r.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="text-[10px] font-black text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded uppercase tracking-wider">{r.type}</span>
+                          <h4 className="font-bold text-slate-800 dark:text-slate-200 mt-2">{r.facility}</h4>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">{r.date} • {r.provider}</p>
+                        </div>
+                        <div className="flex flex-col items-end space-y-2">
+                          {r.bmi && (
+                            <div className="text-right">
+                              <p className="text-xs font-bold text-slate-400 uppercase">BMI</p>
+                              <p className="text-lg font-black text-blue-600">{r.bmi}</p>
+                            </div>
+                          )}
+                          <button
+                            onClick={() => handleSuggestCodes(activePatient.username, r.id, r.rawContent)}
+                            disabled={analyzingRecordId === r.id}
+                            className={`text-[10px] font-bold px-3 py-1.5 rounded-lg transition-all ${
+                              analyzingRecordId === r.id 
+                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed' 
+                                : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'
+                            }`}
+                          >
+                            {analyzingRecordId === r.id ? 'Analyzing...' : 'Suggest Billing Codes'}
+                          </button>
+                        </div>
                       </div>
-                      {r.bmi && (
-                        <div className="text-right">
-                          <p className="text-xs font-bold text-slate-400 uppercase">BMI</p>
-                          <p className="text-lg font-black text-blue-600">{r.bmi}</p>
+
+                      {/* Suggested Codes Display */}
+                      {(r.suggestedCodes || r.ambiguities) && (
+                        <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-4">
+                          {r.suggestedCodes && r.suggestedCodes.length > 0 && (
+                            <div>
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Suggested Billing Codes</p>
+                              <div className="flex flex-wrap gap-2">
+                                {r.suggestedCodes.map((c, idx) => (
+                                  <div key={idx} className="bg-slate-50 dark:bg-slate-800 p-2 rounded-xl border border-slate-100 dark:border-slate-700 flex items-center space-x-2">
+                                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${c.type === 'ICD-10' ? 'bg-emerald-100 text-emerald-700' : 'bg-violet-100 text-violet-700'}`}>
+                                      {c.type}
+                                    </span>
+                                    <span className="font-mono font-bold text-xs text-slate-700 dark:text-slate-300">{c.code}</span>
+                                    <span className="text-[10px] text-slate-500 dark:text-slate-400 truncate max-w-[150px]">{c.description}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {r.ambiguities && r.ambiguities.length > 0 && (
+                            <div className="bg-amber-50 dark:bg-amber-900/20 p-3 rounded-xl border border-amber-100 dark:border-amber-900/30">
+                              <p className="text-[10px] font-black text-amber-700 dark:text-amber-400 uppercase tracking-widest mb-2 flex items-center">
+                                <span className="mr-1">⚠️</span> Ambiguities / Missing Info
+                              </p>
+                              <ul className="list-disc list-inside space-y-1">
+                                {r.ambiguities.map((a, idx) => (
+                                  <li key={idx} className="text-[10px] text-amber-800 dark:text-amber-300 font-medium">{a}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

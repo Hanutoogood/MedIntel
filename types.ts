@@ -10,6 +10,12 @@ export enum RecordType {
 
 export type UserRole = 'admin' | 'patient';
 
+export interface MedicalCode {
+  code: string;
+  description: string;
+  type: 'ICD-10' | 'CPT';
+}
+
 export interface MedicalRecord {
   id: string;
   date: string;
@@ -20,6 +26,8 @@ export interface MedicalRecord {
   rawContent: string;
   status: 'synced' | 'pending' | 'error';
   bmi?: number;
+  suggestedCodes?: MedicalCode[];
+  ambiguities?: string[];
 }
 
 export interface Medication {
